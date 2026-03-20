@@ -1061,37 +1061,50 @@ async function ghLoadRemote(){
   return new Promise((resolve)=>{
     const cbName='_gsLoad'+Date.now();
     const script=document.createElement('script');
-    const url=gsUrl(cfg)+'?callback='+cbName;
+    // Append timestamp to avoid browser cache
+    const url=gsUrl(cfg)+'?callback='+cbName+'&t='+Date.now();
     let done=false;
+
     window[cbName]=function(data){
       done=true;
       delete window[cbName];
       script.remove();
-      if(!data||data==='{}'||Object.keys(data).length===0){
-        setGhStatus('ok','Sheets conectado | sin datos remotos');
+      try{
+        // data may arrive as object (JSONP parsed) or string
+        const parsed=typeof data==='string'?JSON.parse(data):data;
+        if(!parsed||Object.keys(parsed).length===0){
+          setGhStatus('ok','Sheets conectado | sin datos');
+          resolve(null);
+        } else {
+          setGhStatus('ok','Sincronizado con Sheets ✓');
+          resolve({data:parsed});
+        }
+      }catch(e){
+        setGhStatus('err','Error al parsear datos de Sheets');
         resolve(null);
-      } else {
-        setGhStatus('ok','Sincronizado con Sheets ✓');
-        resolve({data});
       }
     };
+
     script.onerror=function(){
       if(done) return;
       done=true;
       delete window[cbName];
       script.remove();
-      setGhStatus('err','Error al leer Sheets');
-      console.error('Sheets JSONP error');
+      // JSONP blocked — likely Apps Script not republished yet
+      setGhStatus('err','Error CORS - republica el Apps Script');
+      showToast('⚠ Error CORS: asegurate de que el Apps Script esta publicado correctamente y pulsa Guardar para subir datos');
       resolve(null);
     };
+
     setTimeout(()=>{
       if(done) return;
       done=true;
       delete window[cbName];
       script.remove();
-      setGhStatus('err','Timeout al leer Sheets');
+      setGhStatus('err','Timeout - sin respuesta de Sheets');
       resolve(null);
-    },10000);
+    },12000);
+
     script.src=url;
     document.head.appendChild(script);
   });
@@ -1101,6 +1114,7 @@ async function ghSaveRemote(stateObj){
   const cfg=getGhConfig(); if(!cfg) return false;
   setGhStatus('syncing','Guardando en Sheets...');
   try{
+    // no-cors bypasses CORS for POST — we can't read the response but it works
     await fetch(gsUrl(cfg),{
       method:'POST',
       mode:'no-cors',
@@ -1111,7 +1125,7 @@ async function ghSaveRemote(stateObj){
   }catch(e){
     setGhStatus('err','Error al guardar en Sheets');
     console.error('Sheets save error:',e);
-    showToast('⚠ Error al guardar en Sheets: '+e.message);
+    showToast('⚠ Error al guardar: '+e.message);
     return false;
   }
 }
